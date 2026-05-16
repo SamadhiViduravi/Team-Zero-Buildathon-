@@ -1,7 +1,6 @@
 "use client";
 
-import type { RiskLevel, SupportTicket } from "@/types/support";
-import { Check, X } from "lucide-react";
+import type { SupportTicket } from "@/types/support";
 import { useEffect } from "react";
 
 type TicketDetailModalProps = {
@@ -9,31 +8,22 @@ type TicketDetailModalProps = {
   onClose: () => void;
 };
 
-function headerClass(riskLevel: RiskLevel) {
-  switch (riskLevel) {
-    case "Critical":
-      return "from-red-100 to-white";
-    case "High":
-      return "from-orange-100 to-white";
-    case "Medium":
-      return "from-amber-50 to-white";
-    default:
-      return "from-emerald-50 to-white";
-  }
+function displayField(value: string) {
+  const trimmed = value?.trim();
+  return trimmed || "—";
 }
 
-function scoreColor(score: number) {
-  if (score >= 80) return "text-red-600";
-  if (score >= 60) return "text-orange-600";
-  if (score >= 31) return "text-amber-600";
-  return "text-emerald-600";
-}
-
-function scoreRing(score: number) {
-  if (score >= 80) return "ring-red-200";
-  if (score >= 60) return "ring-orange-200";
-  if (score >= 31) return "ring-amber-200";
-  return "ring-emerald-200";
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="border-b border-slate-100 py-3 last:border-0">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {label}
+      </p>
+      <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-900">
+        {displayField(value)}
+      </p>
+    </div>
+  );
 }
 
 export function TicketDetailModal({ ticket, onClose }: TicketDetailModalProps) {
@@ -54,125 +44,48 @@ export function TicketDetailModal({ ticket, onClose }: TicketDetailModalProps) {
 
   return (
     <section
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 backdrop-blur-sm sm:items-center"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
+      aria-labelledby="ticket-detail-title"
     >
       <button
         type="button"
         className="absolute inset-0 cursor-default"
-        aria-label="Close"
+        aria-label="Close dialog"
         onClick={onClose}
       />
-      <article className="relative my-4 w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-        <header
-          className={`bg-gradient-to-b px-6 pb-6 pt-5 ${headerClass(ticket.riskLevel)}`}
-        >
-          <div className="flex items-start justify-between">
-            <p className="font-mono text-sm text-slate-500">{ticket.ticketId}</p>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-white hover:text-slate-900"
-              aria-label="Close"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-          <div
-            className={`mx-auto mt-4 flex h-28 w-28 items-center justify-center rounded-full bg-white ring-4 ${scoreRing(ticket.riskScore)}`}
+      <article className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl app-scrollbar">
+        <div className="flex items-start justify-between gap-4">
+          <h2
+            id="ticket-detail-title"
+            className="text-lg font-semibold text-slate-900"
           >
-            <span
-              className={`text-5xl font-bold tabular-nums sm:text-6xl ${scoreColor(ticket.riskScore)}`}
-            >
-              {ticket.riskScore}
-            </span>
-          </div>
-          <p className="mt-3 text-center text-sm text-slate-600">
-            {ticket.riskLevel} risk ? {ticket.priority} priority
-          </p>
-        </header>
+            {ticket.ticketId}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+          >
+            Close
+          </button>
+        </div>
 
-        <section className="max-h-[min(60vh,480px)] space-y-5 overflow-y-auto p-6 app-scrollbar">
-          {ticket.originalMessage && (
-            <section className="border-b border-slate-100 pb-5">
-              <h3 className="text-xs font-semibold uppercase text-slate-500">
-                Customer message
-              </h3>
-              <blockquote className="mt-2 rounded-lg border-l-4 border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                {ticket.originalMessage}
-              </blockquote>
-              <p className="mt-2 text-xs text-slate-500">
-                {ticket.customerName} ? {ticket.channel ?? "?"}
-              </p>
-            </section>
-          )}
-
-          <section className="border-b border-slate-100 pb-5">
-            <h3 className="text-xs font-semibold uppercase text-slate-500">
-              Classification
-            </h3>
-            <p className="mt-2 text-sm text-slate-700">
-              {ticket.intent} ? {ticket.department} ? {ticket.status}
-            </p>
-            <p className="text-sm text-slate-500">Order: {ticket.orderStatus}</p>
-          </section>
-
-          {ticket.scamDetected && (
-            <section className="border-b border-slate-100 pb-5">
-              <p className="rounded-lg bg-red-600 px-4 py-2 text-center text-sm font-semibold text-white">
-                Scam detected ? {ticket.scamType}
-              </p>
-              <ul className="mt-3 flex flex-wrap gap-2">
-                {ticket.scamFlags.map((flag) => (
-                  <li
-                    key={flag}
-                    className="rounded-full bg-red-50 px-3 py-1 text-xs text-red-700 ring-1 ring-red-100"
-                  >
-                    {flag}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          <section className="border-b border-slate-100 pb-5">
-            <h3 className="text-xs font-semibold uppercase text-slate-500">
-              AI reasoning
-            </h3>
-            <p className="mt-2 rounded-lg bg-slate-50 p-4 text-sm text-slate-700">
-              {ticket.reasoning}
-            </p>
-          </section>
-
-          <section className="border-b border-slate-100 pb-5">
-            <h3 className="text-xs font-semibold text-emerald-700">
-              Safe Reply ? Auto-generated by n8n + AI
-            </h3>
-            <p className="mt-2 border-l-4 border-emerald-500 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-              {ticket.generatedReply}
-            </p>
-          </section>
-
-          <section>
-            <h3 className="text-xs font-semibold uppercase text-slate-500">
-              Workflow actions
-            </h3>
-            <ol className="mt-3 space-y-2 rounded-lg border border-slate-100 bg-slate-50 p-4">
-              {ticket.workflowActions.map((action, i) => (
-                <li
-                  key={`${i}-${action}`}
-                  className="flex items-start gap-2 text-sm text-slate-700"
-                >
-                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
-                  <span>
-                    <span className="text-slate-400">{i + 1}.</span> {action}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          </section>
-        </section>
+        <div className="mt-2">
+          <Row label="Intent" value={ticket.intent} />
+          <Row label="Priority" value={ticket.priority} />
+          <Row label="Department" value={ticket.department} />
+          <Row label="Status" value={ticket.status} />
+          <Row
+            label="Risk"
+            value={`${ticket.riskScore} (${ticket.riskLevel})`}
+          />
+          <Row label="Scam" value={ticket.scamDetected ? "Yes" : "No"} />
+          <Row label="Order status" value={ticket.orderStatus} />
+          <Row label="Reasoning" value={ticket.reasoning} />
+          <Row label="Reply" value={ticket.generatedReply} />
+        </div>
       </article>
     </section>
   );

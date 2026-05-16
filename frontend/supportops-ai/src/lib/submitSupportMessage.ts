@@ -90,34 +90,255 @@ function toSupportTicket(
 }
 
 function parseN8nTicketCore(data: unknown): N8nTicketCore {
-  if (!data || typeof data !== "object") {
-    throw new Error("Invalid n8n response: expected JSON object");
-  }
+  const record = unwrapN8nPayload(data);
 
-  const record = data as Record<string, unknown>;
-
-  const ticketId =
-    typeof record.ticketId === "string" ? record.ticketId.trim() : "";
+  const ticketId = pickString(record, ["ticketId", "ticket_id", "id"]);
   if (!ticketId) {
     throw new Error("Invalid n8n response: missing ticketId");
   }
 
-  return {
+  const orderStatus = pickString(record, [
+    "orderStatus",
+    "order_status",
+    "orderStatusText",
+    "order_status_text",
+    "orderState",
+    "order_state",
+  ]);
+
+  const reasoning = pickString(record, [
+    "reasoning",
+    "aiReasoning",
+    "ai_reasoning",
+    "explanation",
+    "analysis",
+    "rationale",
+  ]);
+
+  const generatedReply = pickString(record, [
+    "generatedReply",
+    "generated_reply",
+    "safeReply",
+    "safe_reply",
+    "reply",
+    "customerReply",
+    "customer_reply",
+    "autoReply",
+    "auto_reply",
+    "response",
+    "messageReply",
+    "message_reply",
+  ]);
+
+  const core: N8nTicketCore = {
     ticketId,
-    intent: asString(record.intent, "General Inquiry"),
-    priority: asEnum(record.priority, PRIORITIES, "Medium"),
-    department: asString(record.department, "Support Team"),
-    orderStatus: asString(record.orderStatus, "Unknown"),
-    riskScore: asNumber(record.riskScore, 0),
-    riskLevel: asEnum(record.riskLevel, RISK_LEVELS, "Medium"),
-    scamDetected: record.scamDetected === true,
-    scamType: asString(record.scamType, ""),
-    scamFlags: asStringArray(record.scamFlags),
-    reasoning: asString(record.reasoning, ""),
-    generatedReply: asString(record.generatedReply, ""),
-    workflowActions: asStringArray(record.workflowActions),
-    status: asEnum(record.status, TICKET_STATUSES, "New"),
+    intent: pickString(record, ["intent", "classification", "category"], "General Inquiry"),
+    priority: asEnum(
+      pickRaw(record, ["priority", "ticketPriority", "ticket_priority"]),
+      PRIORITIES,
+      "Medium"
+    ),
+    department: pickString(record, ["department", "team", "assignedDepartment"], "Support Team"),
+    orderStatus: orderStatus || "Unknown",
+    riskScore: asNumber(pickRaw(record, ["riskScore", "risk_score", "score"]), 0),
+    riskLevel: asEnum(
+      pickRaw(record, ["riskLevel", "risk_level", "risk"]),
+      RISK_LEVELS,
+      "Low"
+    ),
+    scamDetected:
+      record.scamDetected === true ||
+      record.scam_detected === true ||
+      pickString(record, ["scamDetected", "scam_detected"]) === "true",
+    scamType: pickString(record, ["scamType", "scam_type", "scamCategory"]),
+    scamFlags: pickStringArray(record, ["scamFlags", "scam_flags", "flags"]),
+    reasoning,
+    generatedReply,
+    workflowActions: pickStringArray(record, [
+      "workflowActions",
+      "workflow_actions",
+      "actions",
+      "steps",
+    ]),
+    status: asEnum(
+      pickRaw(record, ["status", "ticketStatus", "ticket_status"]),
+      TICKET_STATUSES,
+      "New"
+    ),
   };
+
+  if (!reasoning || !generatedReply || orderStatus === "Unknown") {
+    console.warn("[SupportOps] n8n response missing some fields. Parsed keys:", Object.keys(record));
+    if (!reasoning) console.warn("[SupportOps] Missing: reasoning");
+    if (!generatedReply) console.warn("[SupportOps] Missing: generatedReply / reply");
+    if (orderStatus === "Unknown") console.warn("[SupportOps] Missing: orderStatus");
+  }
+
+  return core;
+}
+
+/** Unwrap common n8n / webhook response shapes into a flat ticket object */
+function unwrapN8nPayload(data: unknown): Record<string, unknown> {
+  let current: unknown = data;
+
+  for (let depth = 0; depth < 10; depth++) {
+    if (current == null) {
+      return {};
+    }
+
+    if (typeof current === "string") {
+      const parsed = tryParseJson(current);
+      if (parsed) {
+        current = parsed;
+        continue;
+      }
+      return {};
+    }
+
+    if (Array.isArray(current)) {
+      current = current.length > 0 ? current[0] : null;
+      continue;
+    }
+
+    if (typeof current !== "object") {
+      return {};
+    }
+
+    const record = current as Record<string, unknown>;
+
+    if (hasTicketId(record.ticket)) {
+      current = record.ticket;
+      continue;
+    }
+
+    if (hasTicketId(record)) {
+      return mergeTicketSources(record);
+    }
+
+    const nestedKeys = ["json", "body", "data", "output", "result", "response"] as const;
+    let stepped = false;
+
+    for (const key of nestedKeys) {
+      const nested = record[key];
+      if (nested == null) continue;
+
+      if (typeof nested === "object") {
+        current = nested;
+        stepped = true;
+        break;
+      }
+
+      if (typeof nested === "string") {
+        const parsed = tryParseJson(nested);
+        if (parsed && (hasTicketId(parsed) || "intent" in parsed)) {
+          current = parsed;
+          stepped = true;
+          break;
+        }
+      }
+    }
+
+    if (!stepped) {
+      return mergeTicketSources(record);
+    }
+  }
+
+  if (current && typeof current === "object" && !Array.isArray(current)) {
+    return mergeTicketSources(current as Record<string, unknown>);
+  }
+
+  return {};
+}
+
+/** Merge top-level fields with nested ticket / AI output objects */
+function mergeTicketSources(
+  record: Record<string, unknown>
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...record };
+
+  const nestedSources = [
+    record.ticket,
+    record.data,
+    record.output,
+    record.result,
+  ];
+
+  for (const source of nestedSources) {
+    if (source && typeof source === "object" && !Array.isArray(source)) {
+      Object.assign(merged, source as Record<string, unknown>);
+    } else if (typeof source === "string") {
+      const parsed = tryParseJson(source);
+      if (parsed) Object.assign(merged, parsed);
+    }
+  }
+
+  return merged;
+}
+
+function hasTicketId(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const id = (value as Record<string, unknown>).ticketId;
+  return typeof id === "string" && id.trim().length > 0;
+}
+
+function tryParseJson(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return null;
+
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (Array.isArray(parsed) && parsed[0] && typeof parsed[0] === "object") {
+      return parsed[0] as Record<string, unknown>;
+    }
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function pickRaw(
+  record: Record<string, unknown>,
+  keys: string[]
+): unknown {
+  for (const key of keys) {
+    if (record[key] !== undefined && record[key] !== null) {
+      return record[key];
+    }
+  }
+  return undefined;
+}
+
+function pickString(
+  record: Record<string, unknown>,
+  keys: string[],
+  fallback = ""
+): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
+  }
+  return fallback;
+}
+
+function pickStringArray(
+  record: Record<string, unknown>,
+  keys: string[]
+): string[] {
+  for (const key of keys) {
+    const value = record[key];
+    const arr = asStringArray(value);
+    if (arr.length > 0) return arr;
+  }
+  return [];
 }
 
 function fallbackTicket(payload: SupportMessagePayload): SupportTicket {
@@ -126,7 +347,7 @@ function fallbackTicket(payload: SupportMessagePayload): SupportTicket {
 
   const createdAt = new Date().toISOString();
   const orderStatus = payload.orderId
-    ? `Fallback: checked order ${payload.orderId}`
+    ? `Checked order ${payload.orderId} — confirmation pending in system`
     : "No order ID provided";
 
   if (risky) {
@@ -161,11 +382,13 @@ function fallbackTicket(payload: SupportMessagePayload): SupportTicket {
     };
   }
 
+  const orderRef = payload.orderId ? `Order ID: ${payload.orderId}` : "your request";
+
   return {
     ticketId: `TKT-${Date.now().toString().slice(-5)}`,
-    intent: "General Inquiry",
+    intent: inferIntentFromMessage(message),
     priority: "Medium",
-    department: "Support Team",
+    department: inferDepartmentFromMessage(message),
     orderStatus,
     riskScore: 35,
     riskLevel: "Medium",
@@ -174,12 +397,11 @@ function fallbackTicket(payload: SupportMessagePayload): SupportTicket {
     scamFlags: [],
     reasoning:
       "Fallback mode classified the message as a normal support request with no scam keywords detected.",
-    generatedReply:
-      "Thank you for contacting us. Our support team has received your request and will respond shortly.",
+    generatedReply: `Thank you for your message regarding ${orderRef}. We have received your request and our team will update you shortly.`,
     workflowActions: [
       "Fallback mode activated",
-      "Message classified as General Inquiry",
-      "Ticket assigned to Support Team",
+      "Message classified locally",
+      "Ticket assigned to support team",
       "Safe reply generated",
     ],
     status: "Assigned",
@@ -188,6 +410,20 @@ function fallbackTicket(payload: SupportMessagePayload): SupportTicket {
     channel: payload.channel,
     createdAt,
   };
+}
+
+function inferIntentFromMessage(message: string): string {
+  if (message.includes("delivery") || message.includes("ship")) return "Delivery Issue";
+  if (message.includes("refund") || message.includes("damage")) return "Refund Request";
+  if (message.includes("pay") || message.includes("payment")) return "Payment Issue";
+  return "General Inquiry";
+}
+
+function inferDepartmentFromMessage(message: string): string {
+  if (message.includes("delivery")) return "Delivery Team";
+  if (message.includes("refund") || message.includes("damage")) return "Returns Team";
+  if (message.includes("pay")) return "Payments Team";
+  return "Support Team";
 }
 
 const PRIORITIES: Priority[] = ["Low", "Medium", "High", "Critical"];
@@ -199,12 +435,13 @@ const TICKET_STATUSES: TicketStatus[] = [
   "Resolved",
 ];
 
-function asString(value: unknown, fallback: string): string {
-  return typeof value === "string" ? value : fallback;
-}
-
 function asNumber(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
 }
 
 function asStringArray(value: unknown): string[] {
@@ -217,5 +454,8 @@ function asEnum<T extends string>(
   allowed: readonly T[],
   fallback: T
 ): T {
-  return allowed.includes(value as T) ? (value as T) : fallback;
+  if (typeof value === "string" && allowed.includes(value as T)) {
+    return value as T;
+  }
+  return fallback;
 }
