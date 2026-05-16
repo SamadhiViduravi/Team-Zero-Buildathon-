@@ -4,6 +4,19 @@ type DepartmentBoardProps = {
   tickets: SupportTicket[];
 };
 
+function riskAccent(ticket: SupportTicket) {
+  switch (ticket.riskLevel) {
+    case "Critical":
+      return "border-l-red-500";
+    case "High":
+      return "border-l-orange-500";
+    case "Medium":
+      return "border-l-amber-400";
+    default:
+      return "border-l-emerald-500";
+  }
+}
+
 export function DepartmentBoard({ tickets }: DepartmentBoardProps) {
   const byDepartment = tickets.reduce<Record<string, SupportTicket[]>>(
     (acc, ticket) => {
@@ -18,24 +31,36 @@ export function DepartmentBoard({ tickets }: DepartmentBoardProps) {
   const departments = Object.keys(byDepartment).sort();
 
   return (
-    <section className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
-        Department board
-      </h2>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+    <section className="app-card p-5 sm:p-6">
+      <header className="mb-4">
+        <h2 className="text-lg font-bold text-slate-900">Department Board</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          How tickets are routed across your teams this week
+        </p>
+      </header>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {departments.length === 0 && (
-          <p className="text-sm text-zinc-500">No routed tickets yet.</p>
+          <p className="col-span-full text-sm text-slate-500">
+            No routed tickets this week.
+          </p>
         )}
         {departments.map((department) => (
           <article
             key={department}
-            className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700"
+            className="rounded-xl border border-slate-200 bg-slate-50 p-3"
           >
-            <h3 className="text-sm font-medium">{department}</h3>
-            <ul className="mt-2 space-y-1 text-xs text-zinc-600 dark:text-zinc-400">
+            <h3 className="text-sm font-semibold text-slate-900">{department}</h3>
+            <p className="text-xs text-slate-500">
+              {byDepartment[department].length} tickets
+            </p>
+            <ul className="mt-2 max-h-28 space-y-1 overflow-y-auto app-scrollbar">
               {byDepartment[department].map((ticket) => (
-                <li key={ticket.ticketId}>
-                  {ticket.ticketId} · {ticket.intent} ({ticket.status})
+                <li
+                  key={ticket.ticketId}
+                  className={`rounded border border-slate-200 border-l-2 bg-white px-2 py-1 font-mono text-[10px] text-slate-600 ${riskAccent(ticket)}`}
+                >
+                  {ticket.ticketId}
+                  {ticket.scamDetected ? " 🚨" : ""}
                 </li>
               ))}
             </ul>
